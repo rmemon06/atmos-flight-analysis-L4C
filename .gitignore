@@ -1,0 +1,12 @@
+# Full raw flight data lives here locally (23 MB per frame) and is not committed
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
