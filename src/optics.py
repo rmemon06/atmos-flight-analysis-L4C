@@ -35,7 +35,12 @@ def propagate(field: np.ndarray, z: float) -> np.ndarray:
     FX, FY = np.meshgrid(fx, fy)
     # How steeply each plane wave travels; >0 means it really travels forward
     along = 1 - (WAVELENGTH * FX) ** 2 - (WAVELENGTH * FY) ** 2
-    phase_delay = np.exp(1j * 2 * np.pi / WAVELENGTH * z * np.sqrt(np.maximum(along, 0)))
+    # Delay relative to the straight-through beam, k z (sqrt(along) - 1). The -1 matters:
+    # the unblocked beam in hologram() isn't delayed, so leaving it out puts a spurious
+    # exp(ikz) between the two, which shifts every ring and spins round once per 0.5 um
+    # of z. Written as -(1 - along) / (1 + sqrt(along)) so no precision is lost.
+    root = np.sqrt(np.maximum(along, 0))
+    phase_delay = np.exp(-1j * 2 * np.pi / WAVELENGTH * z * (1 - np.maximum(along, 0)) / (1 + root))
     phase_delay[along < 0] = 0         # waves that can't travel just die out
     return np.fft.ifft2(np.fft.fft2(field) * phase_delay)
 
