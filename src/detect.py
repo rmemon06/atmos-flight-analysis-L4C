@@ -28,10 +28,12 @@ from raw_io import load_raw, parse_filename
 
 PRESMOOTH = 1.5      # px. Light blur first: cuts pixel noise, but fringes near
                      # a ring's centre are many pixels wide, so they survive
-ENERGY_BLUR = 28.0   # px. Has to be wider than the first ring: a ring's exact
-                     # centre has almost no contrast, so a smaller blur makes a
-                     # doughnut with two hilltops instead of one hill
-MIN_SEPARATION = 60  # px. Only the highest hilltop within this distance is kept
+ENERGY_BLUR = 20.0   # px. Narrow enough that a weak ring next to a strong one
+                     # still makes its own hill. (A ring's exact centre has
+                     # almost no contrast, so one ring can give two hilltops;
+                     # refining and merging below sorts that out.)
+MIN_SEPARATION = 15  # px. Only the highest point within this distance counts as a
+                     # hilltop. Kept small for the same reason as ENERGY_BLUR
 THRESHOLD = 6.0      # a hilltop must be this many times above the noise
 NOISE_BLOCK = 64     # px. Noise is measured in blocks of this size
 REFINE_RADIUS = 160  # px. Size of the patch used to find a pattern's true centre
