@@ -62,3 +62,15 @@ def test_off_centre_point_is_much_less_round():
     fl = fake_flattened(hologram(SHAPE, [Particle(CENTRE, CENTRE, 8e-3, 25e-6)]))
     c = contrast_map(fl.flat)
     assert roundness(c, CENTRE + 40, CENTRE) < roundness(c, CENTRE, CENTRE) - 0.3
+
+
+def test_detection_between_two_particles_becomes_two_particles():
+    # The detector can land halfway between two similar rings, because the
+    # pair looks the same rotated 180 degrees about their midpoint
+    left, right = Particle(CENTRE - 55, CENTRE, 8e-3, 25e-6), Particle(CENTRE + 55, CENTRE, 10e-3, 22e-6)
+    fl = fake_flattened(hologram(SHAPE, [left, right]))
+    described = describe(fl, [Detection(CENTRE, CENTRE, 100.0)])   # one detection, in the middle
+    particles = [d for d in described if d.is_particle]
+    assert len(particles) == 2
+    for p in (left, right):
+        assert min(np.hypot(d.x - p.x, d.y - p.y) for d in particles) <= 3
