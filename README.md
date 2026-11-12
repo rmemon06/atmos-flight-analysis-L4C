@@ -61,5 +61,3 @@ Raw frames are 23 MB each, so the full flight isn't stored in this repo.
 ## Credits
 
 - **Flight data:** DU Spaceflight ATMOS team.
-- **Processed image package** (background subtraction, Fresnel reconstruction, autofocus) and the laser control script: Walker, in [ATMOS_2026_L4CData](https://github.com/DU-Spaceflight/ATMOS_2026_L4CData). Not part of this repo.
-- **Analysis code in this repo:** Rohan Memon, developed with AI assistance (Claude).
