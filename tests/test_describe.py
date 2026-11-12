@@ -4,7 +4,7 @@ import numpy as np
 
 from describe import describe, rotational_average, roundness
 from detect import Detection, contrast_map
-from flatten import flatten
+from flatten import BLACK_LEVEL, flatten
 from optics import PIXEL, Particle, hologram, propagate
 
 SHAPE = (1400, 1400)
@@ -13,7 +13,7 @@ CENTRE = 700
 
 def fake_flattened(light, seed=0):
     rng = np.random.default_rng(seed)
-    return flatten(rng.poisson(1000 * light).astype(np.float32))
+    return flatten(rng.poisson(1000 * light).astype(np.float32) + BLACK_LEVEL)
 
 
 def fibre(length_um, width_um, z, angle=0.6):

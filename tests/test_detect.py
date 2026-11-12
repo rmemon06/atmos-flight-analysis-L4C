@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from detect import detect, strength_map
-from flatten import flatten
+from flatten import BLACK_LEVEL, flatten
 from optics import Particle, hologram
 
 SHAPE = (2200, 2900)
@@ -25,10 +25,10 @@ def fake_beam(shape):
 
 
 def fake_frame(particles, shape=SHAPE, seed=0):
-    """Like a real camera frame: beam x hologram, with photon (Poisson) noise."""
+    """Like a real camera frame: beam x hologram, photon (Poisson) noise, plus the camera's zero."""
     rng = np.random.default_rng(seed)
     light = fake_beam(shape) * hologram(shape, particles)
-    return rng.poisson(light).astype(np.float32)
+    return rng.poisson(light).astype(np.float32) + BLACK_LEVEL
 
 
 @pytest.fixture(scope="module")
@@ -91,7 +91,7 @@ def test_crowded_frame_benchmark():
         if all(np.hypot(x - p.x, y - p.y) > 70 for p in particles):
             particles.append(Particle(x, y, rng.uniform(3, 16) * 1e-3, rng.uniform(10, 40) * 1e-6))
     light = fake_beam(SHAPE) * hologram(SHAPE, particles)
-    found = detect(flatten(rng.poisson(light).astype(np.float32)))
+    found = detect(flatten(rng.poisson(light).astype(np.float32) + BLACK_LEVEL))
 
     hits = sum(nearest(found, p.x, p.y) <= 5 for p in particles)
     wrong = sum(min(np.hypot(d.x - p.x, d.y - p.y) for p in particles) > 8 for d in found)

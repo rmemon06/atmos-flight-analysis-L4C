@@ -18,12 +18,13 @@ import cv2
 import numpy as np
 from scipy import ndimage
 
-from src.raw_io import load_raw, parse_filename
+from raw_io import load_raw, parse_filename
 
-# Camera reading with no light at all. Not measured yet: a frame taken with
-# the laser off would give it. Until then it's 0, which makes rings in the
-# dimmest areas look slightly weaker than they really are.
-BLACK_LEVEL = 0.0
+# Camera reading with no light at all. Measured from flight frame 133, taken
+# after the laser had switched off: mean 27.9, noise 1.3, flat across the
+# sensor. It matters most in the dim areas: the top of frame 1 reads about 40,
+# but only about 12 of that is laser light.
+BLACK_LEVEL = 28.0
 
 # Beam map settings. The median window has to be much wider than a ring
 # pattern, or the beam map starts tracing the rings instead of the beam.
@@ -32,7 +33,8 @@ MEDIAN_SIZE = 15     # median window in shrunk pixels (15 x 16 = 240 px at full 
 SMOOTH_SIGMA = 4.0   # light blur afterwards, in shrunk pixels, to remove the median's blockiness
 
 # Usable-area settings
-MIN_BEAM = 60        # below this reading, noise swamps faint rings
+MIN_BEAM = 60        # laser light (camera zero already removed) below which noise
+                     # swamps faint rings. At this cut-off pixel noise is about 7%
 EDGE = 80            # pixels ignored at each edge: the beam map is least reliable
                      # there, and later steps cut out patches around each ring
 
@@ -168,8 +170,8 @@ if __name__ == "__main__":
     bright_noise = 100 * np.median(noise[order[-tenth:], 1])
 
     print(f"frame {info.camera_id} at {info.captured_utc.isoformat(timespec='milliseconds')}")
-    print(f"beam: {result.beam.min():.0f} to {result.beam.max():.0f} "
-          f"(brightest spot is {result.beam.max() / result.beam.min():.0f}x the dimmest)")
+    print(f"laser light: {result.beam.min():.0f} to {result.beam.max():.0f} "
+          f"(after removing the camera's zero of {BLACK_LEVEL:.0f})")
     print(f"usable: {usable_pct:.0f}% of the sensor")
     print(f"noise: {dim_noise:.1f}% in the dimmest usable areas, {bright_noise:.1f}% in the brightest")
 

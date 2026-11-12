@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from flatten import flatten, pixel_noise, usable_mask
+from flatten import BLACK_LEVEL, flatten, pixel_noise, usable_mask
 
 H, W = 1024, 1536
 BRIGHT = (350, 800)   # (x, y) near the beam's centre
@@ -23,7 +23,7 @@ def particle(x: int, y: int, depth: float = 0.10, size: float = 12) -> np.ndarra
 
 
 def test_empty_frame_flattens_to_one():
-    result = flatten(fake_beam())
+    result = flatten(fake_beam() + BLACK_LEVEL)   # a real camera adds its zero offset
     inside = result.flat[result.usable]
     assert abs(inside.mean() - 1) < 0.01
     assert np.abs(inside - 1).max() < 0.03
@@ -34,7 +34,7 @@ def test_same_particle_gives_same_signal_in_bright_and_dim_areas():
     # Check the setup really is bright vs dim
     assert beam[BRIGHT[1], BRIGHT[0]] > 5 * beam[DIM[1], DIM[0]]
 
-    raw = beam * (1 + particle(*BRIGHT) + particle(*DIM))
+    raw = beam * (1 + particle(*BRIGHT) + particle(*DIM)) + BLACK_LEVEL
     flat = flatten(raw).flat
     assert 1 - flat[BRIGHT[1], BRIGHT[0]] == pytest.approx(0.10, abs=0.01)
     assert 1 - flat[DIM[1], DIM[0]] == pytest.approx(0.10, abs=0.01)
@@ -44,7 +44,7 @@ def test_black_level_has_to_be_removed():
     offset = 20.0
     raw = fake_beam() * (1 + particle(*DIM)) + offset
 
-    ignored = 1 - flatten(raw).flat[DIM[1], DIM[0]]
+    ignored = 1 - flatten(raw, black_level=0).flat[DIM[1], DIM[0]]
     removed = 1 - flatten(raw, black_level=offset).flat[DIM[1], DIM[0]]
 
     assert removed == pytest.approx(0.10, abs=0.01)
@@ -66,7 +66,7 @@ def test_mask_drops_dim_areas_and_edges():
 def test_pixel_noise_measures_known_noise():
     rng = np.random.default_rng(0)
     beam = fake_beam()
-    raw = beam * (1 + rng.normal(0, 0.03, beam.shape))   # 3% noise everywhere
+    raw = beam * (1 + rng.normal(0, 0.03, beam.shape)) + BLACK_LEVEL   # 3% noise everywhere
     result = flatten(raw)
     noise = pixel_noise(result.flat, result.beam)
     assert np.median(noise[:, 1]) == pytest.approx(0.03, rel=0.1)
