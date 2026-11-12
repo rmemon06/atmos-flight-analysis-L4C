@@ -33,8 +33,11 @@ MEDIAN_SIZE = 15     # median window in shrunk pixels (15 x 16 = 240 px at full 
 SMOOTH_SIGMA = 4.0   # light blur afterwards, in shrunk pixels, to remove the median's blockiness
 
 # Usable-area settings
-MIN_BEAM = 60        # laser light (camera zero already removed) below which noise
-                     # swamps faint rings. At this cut-off pixel noise is about 7%
+MIN_BEAM = 4         # laser light (camera zero already removed) below which there's
+                     # almost nothing to measure. Dim areas don't need masking beyond
+                     # this: the detector judges every spot against the noise measured
+                     # in its own area. Tested: pure noise lit with just 4 units gives
+                     # no false detections
 EDGE = 80            # pixels ignored at each edge: the beam map is least reliable
                      # there, and later steps cut out patches around each ring
 

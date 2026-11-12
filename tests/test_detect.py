@@ -1,8 +1,14 @@
-"""Tests for detect.py, using fake holograms with particles at known places."""
+"""Tests for detect.py, using fake holograms with particles at known places.
+
+detect() is deliberately loose: it suggests candidates, and describe() then
+decides which are particles. So "did it find X?" is tested on detect's output,
+while "no false alarms" is tested on the final particles.
+"""
 
 import numpy as np
 import pytest
 
+from describe import describe
 from detect import detect, strength_map
 from flatten import BLACK_LEVEL, flatten
 from optics import Particle, hologram
@@ -31,10 +37,20 @@ def fake_frame(particles, shape=SHAPE, seed=0):
     return rng.poisson(light).astype(np.float32) + BLACK_LEVEL
 
 
+def particles(fl):
+    """Detect, then keep only what describe() decides are particles."""
+    return [d for d in describe(fl, detect(fl)) if d.is_particle]
+
+
 @pytest.fixture(scope="module")
-def planted_detections():
+def planted_flattened():
     # Built once and shared by the tests below, because making it takes a few seconds
-    return detect(flatten(fake_frame(PLANTED)))
+    return flatten(fake_frame(PLANTED))
+
+
+@pytest.fixture(scope="module")
+def planted_detections(planted_flattened):
+    return detect(planted_flattened)
 
 
 def nearest(found, x, y):
@@ -46,9 +62,11 @@ def test_finds_every_planted_particle_in_the_right_place(planted_detections):
         assert nearest(planted_detections, p.x, p.y) <= 2, f"missed particle at z={p.z * 1e3:.0f} mm"
 
 
-def test_no_false_alarms(planted_detections):
-    for d in planted_detections:
-        assert min(np.hypot(d.x - p.x, d.y - p.y) for p in PLANTED) <= 15
+def test_no_false_particles(planted_flattened):
+    found = particles(planted_flattened)
+    assert len(found) == len(PLANTED)
+    for d in found:
+        assert min(np.hypot(d.x - p.x, d.y - p.y) for p in PLANTED) <= 3
 
 
 def test_pure_noise_has_no_detections():
@@ -66,16 +84,16 @@ def test_far_particle_centre_is_found_and_counted_once():
     # A far particle's energy hill has a flat top, so its highest point can be
     # 30+ px off-centre, and it can have two hilltops. Refining fixes both.
     shape = (2200, 2200)
-    found = detect(flatten(fake_frame([Particle(1100, 1100, 20e-3, 28e-6)], shape)))
+    found = particles(flatten(fake_frame([Particle(1100, 1100, 20e-3, 28e-6)], shape)))
     assert len(found) == 1
     assert nearest(found, 1100, 1100) <= 2
 
 
-@pytest.mark.xfail(reason="known limitation: a very far, very small particle has rings "
-                          "500+ px wide, and its outer rings form hills of their own")
 def test_very_far_small_particle_counted_once():
+    # Its rings are 500+ px wide and the outer rings make hills of their own.
+    # detect() suggests those too, but they aren't round, so describe() drops them
     shape = (2200, 2200)
-    found = detect(flatten(fake_frame([Particle(1100, 1100, 24e-3, 15e-6)], shape)))
+    found = particles(flatten(fake_frame([Particle(1100, 1100, 24e-3, 15e-6)], shape)))
     assert len(found) == 1
 
 
@@ -85,15 +103,15 @@ def test_crowded_frame_benchmark():
     # 60; this one finds 44. Rings within ~100 px of a much stronger neighbour
     # are the ones it still misses. Raise the bar here whenever detection improves.
     rng = np.random.default_rng(5)
-    particles = []
-    while len(particles) < 60:
+    planted = []
+    while len(planted) < 60:
         x, y = int(rng.uniform(520, 2380)), int(rng.uniform(520, 1680))
-        if all(np.hypot(x - p.x, y - p.y) > 70 for p in particles):
-            particles.append(Particle(x, y, rng.uniform(3, 16) * 1e-3, rng.uniform(10, 40) * 1e-6))
-    light = fake_beam(SHAPE) * hologram(SHAPE, particles)
-    found = detect(flatten(rng.poisson(light).astype(np.float32) + BLACK_LEVEL))
+        if all(np.hypot(x - p.x, y - p.y) > 70 for p in planted):
+            planted.append(Particle(x, y, rng.uniform(3, 16) * 1e-3, rng.uniform(10, 40) * 1e-6))
+    light = fake_beam(SHAPE) * hologram(SHAPE, planted)
+    found = particles(flatten(rng.poisson(light).astype(np.float32) + BLACK_LEVEL))
 
-    hits = sum(nearest(found, p.x, p.y) <= 5 for p in particles)
-    wrong = sum(min(np.hypot(d.x - p.x, d.y - p.y) for p in particles) > 8 for d in found)
+    hits = sum(nearest(found, p.x, p.y) <= 5 for p in planted)
+    wrong = sum(min(np.hypot(d.x - p.x, d.y - p.y) for p in planted) > 8 for d in found)
     assert hits >= 42
     assert wrong <= 3

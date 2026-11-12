@@ -74,3 +74,22 @@ def test_detection_between_two_particles_becomes_two_particles():
     assert len(particles) == 2
     for p in (left, right):
         assert min(np.hypot(d.x - p.x, d.y - p.y) for d in particles) <= 3
+
+
+def test_noise_does_not_make_a_faint_ring_look_less_round():
+    # The same particle under bright light and under very dim, noisy light
+    light = hologram(SHAPE, [Particle(CENTRE, CENTRE, 8e-3, 25e-6)])
+    bright = fake_flattened(light)                       # 1000 units of light
+    rng = np.random.default_rng(1)
+    dim = flatten(rng.poisson(20 * light).astype(np.float32) + BLACK_LEVEL)   # 20 units
+    detection = [Detection(CENTRE, CENTRE, 10.0)]
+    assert describe(dim, detection)[0].is_particle
+    assert abs(describe(dim, detection)[0].roundness - describe(bright, detection)[0].roundness) < 0.15
+
+
+def test_pure_noise_in_dim_light_has_no_particles():
+    from detect import detect
+    for seed, light in enumerate((4, 12, 40)):
+        rng = np.random.default_rng(seed)
+        fl = flatten(rng.poisson(np.full((1500, 2000), float(light))).astype(np.float32) + BLACK_LEVEL)
+        assert not any(d.is_particle for d in describe(fl, detect(fl)))

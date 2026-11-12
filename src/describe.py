@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-from detect import Detection, contrast_map, detect
+from detect import Detection, contrast_map, detect, noise_energy
 from flatten import Flattened, flatten
 from raw_io import load_raw, parse_filename
 
@@ -42,6 +42,7 @@ SEARCH_STEP = 8     # px between the points tried in that first, coarse search
 SEARCH_RADIUS = 50  # px. A smaller patch while searching: 2.5x faster, and less
                     # confused by the neighbour we're trying to separate from
 MERGE_DISTANCE = 35 # px. Centres found this close together are the same ring
+SIGNAL_MIN = 0.5    # a patch needs at least half as much real pattern as noise to be judged
 
 
 @dataclass(frozen=True)
@@ -80,30 +81,44 @@ def rotational_average(patch: np.ndarray) -> np.ndarray:
     return ring_means[ring].reshape(patch.shape)   # paint each pixel with its ring's mean
 
 
-def roundness(contrast: np.ndarray, x: int, y: int, radius: int = ROUND_RADIUS) -> float:
-    """How closely the pattern around (x, y) matches a perfectly round version of itself."""
+def roundness(contrast: np.ndarray, x: int, y: int, radius: int = ROUND_RADIUS,
+              noise_var: float = 0.0) -> float:
+    """How closely the pattern around (x, y) matches a perfectly round version of itself.
+
+    noise_var is how much of the patch's variation we expect from noise alone
+    (from detect.noise_energy). Noise makes even a perfect ring look less
+    round, so in dim, noisy areas faint rings would be rejected unfairly.
+    Allowing for it asks: how round is the part of the patch that isn't noise?
+    """
     h, w = contrast.shape
     if not (radius <= x < w - radius and radius <= y < h - radius):
         return float("nan")   # too close to the edge to cut a full patch
     patch = contrast[y - radius:y + radius + 1, x - radius:x + radius + 1].astype(np.float64)
     _, weight, _ = _geometry(radius)
+    weight = weight / weight.sum()
     a = patch.ravel()
-    b = rotational_average(patch).ravel()
+    b = rotational_average(patch).ravel()   # its rotational average has almost no noise left
 
-    # Weighted correlation between the patch and its round version
-    a = a - (weight * a).sum() / weight.sum()
-    b = b - (weight * b).sum() / weight.sum()
-    return float((weight * a * b).sum() / np.sqrt((weight * a * a).sum() * (weight * b * b).sum()))
+    # Weighted correlation between the patch and its round version...
+    a = a - (weight * a).sum()
+    b = b - (weight * b).sum()
+    covariance = (weight * a * b).sum()
+    # ...except the patch's own variation has the expected noise taken out first
+    signal = (weight * a * a).sum() - noise_var
+    if signal < SIGNAL_MIN * noise_var:
+        return 0.0   # almost all noise: nothing there to call round
+    return float(np.clip(covariance / np.sqrt(signal * (weight * b * b).sum()), -1.0, 1.0))
 
 
-def round_centres_near(contrast: np.ndarray, usable: np.ndarray, x0: int, y0: int) -> list[tuple[int, int]]:
+def round_centres_near(contrast: np.ndarray, usable: np.ndarray, noise: np.ndarray,
+                       x0: int, y0: int) -> list[tuple[int, int]]:
     """Centres of round patterns near (x0, y0), for a detection that isn't round itself."""
     h, w = contrast.shape
 
     def score(x, y):
         if not (0 <= x < w and 0 <= y < h and usable[y, x]):
             return -1.0
-        r = roundness(contrast, x, y, SEARCH_RADIUS)
+        r = roundness(contrast, x, y, SEARCH_RADIUS, noise[y, x])
         return -1.0 if np.isnan(r) else r
 
     # 1. Coarse search: roundness on a grid of points around the detection
@@ -146,22 +161,25 @@ def dark_fraction(contrast: np.ndarray, x: int, y: int, radius: int = ROUND_RADI
 def describe(fl: Flattened, found: list[Detection]) -> list[Described]:
     """Roundness and dark fraction for every detection, splitting misplaced ones."""
     contrast = contrast_map(fl.flat)
+    noise = noise_energy(fl.flat, fl.beam)   # expected noise at every pixel
     kept: list[Described] = []
+
+    def round_at(x: int, y: int) -> float:
+        return roundness(contrast, x, y, noise_var=noise[y, x])
 
     def keep(x: int, y: int, strength: float) -> None:
         if any(np.hypot(x - k.x, y - k.y) < MERGE_DISTANCE for k in kept):
             return   # already have this ring
-        kept.append(Described(x, y, strength, roundness(contrast, x, y),
-                              dark_fraction(contrast, x, y)))
+        kept.append(Described(x, y, strength, round_at(x, y), dark_fraction(contrast, x, y)))
 
     for d in sorted(found, key=lambda d: d.strength, reverse=True):
-        r, dark = roundness(contrast, d.x, d.y), dark_fraction(contrast, d.x, d.y)
+        r, dark = round_at(d.x, d.y), dark_fraction(contrast, d.x, d.y)
         if r >= ROUND_MIN or dark >= DARK_MAX or np.isnan(r):
             keep(d.x, d.y, d.strength)   # round already, or a big fibre, or at the edge
             continue
         # Not round: maybe it landed between particles. Look for round centres nearby.
-        centres = [(x, y) for x, y in round_centres_near(contrast, fl.usable, d.x, d.y)
-                   if roundness(contrast, x, y) >= ROUND_MIN]
+        centres = [(x, y) for x, y in round_centres_near(contrast, fl.usable, noise, d.x, d.y)
+                   if round_at(x, y) >= ROUND_MIN]
         for x, y in centres:
             keep(x, y, d.strength)
         if not centres:

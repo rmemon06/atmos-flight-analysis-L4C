@@ -34,7 +34,12 @@ ENERGY_BLUR = 20.0   # px. Narrow enough that a weak ring next to a strong one
                      # refining and merging below sorts that out.)
 MIN_SEPARATION = 15  # px. Only the highest point within this distance counts as a
                      # hilltop. Kept small for the same reason as ENERGY_BLUR
-THRESHOLD = 6.0      # a hilltop must be this many times above the noise
+THRESHOLD = 2.0      # a hilltop must be this many times above the noise. Pure noise
+                     # scores about 1 by construction, so 2 is well clear of it.
+                     # Deliberately loose: real frames have a "sea" of faint
+                     # overlapping rings scoring about 4, and faint rings don't stand
+                     # out from it by energy alone. The roundness check in step 4
+                     # (shape, not energy) decides what's really a particle
 NOISE_BLOCK = 64     # px. Noise is measured in blocks of this size
 REFINE_RADIUS = 160  # px. Size of the patch used to find a pattern's true centre
 MERGE_DISTANCE = 20  # px. Detections this close after refining are the same ring
