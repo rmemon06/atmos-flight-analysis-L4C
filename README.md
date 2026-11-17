@@ -26,10 +26,24 @@ The payload flew at the Launch 4 Change (L4C) event in August 2026 and recorded 
 |---|---|
 | Decode the raw camera files | Done |
 | Map the laser beam and even out brightness | Done |
-| Detect and count ring patterns in each frame | Next |
+| Find particles by refocusing the hologram | Done |
+| Estimate particle sizes and distances from their rings | Done |
 | Track particles across frames: stuck or floating? | Planned |
-| Estimate particle sizes | Planned |
 | Add the sensor board firmware | Planned |
+
+## How the code finds particles
+
+`src/run.py` runs every step on a folder of frames. For each frame:
+
+1. **Even out the beam** (`flatten.py`). Divide by a smooth map of the laser beam, so every pixel reads as a fraction of normal brightness (1.0 = nothing there).
+2. **Refocus** (`detect.py`, using `optics.Refocuser`). Run the light backwards to depths from 2.5 to 26 mm. Each particle's rings gather back into one small dark dot at its own depth, so even rings fainter than the noise add up into a dot you can see.
+3. **Find the dots.** Mark every spot at least 8 times darker than the noise around it, and keep each particle once, at the depth where it's sharpest.
+4. **Is it a particle?** (`describe.py`). In focus, a particle is a compact dot. Fibres and streaks are lines, and big fibres black out the area around them, so both are left out.
+5. **Size it** (`size.py`). Fit the exact diffraction pattern of a round particle to its rings, which gives both its diameter and its distance from the sensor.
+
+The first version found particles by squaring the rings and blurring them into one "hill" per particle. Squaring throws away whether each ring is dark or bright, so faint rings drowned in the noise. Next to bright particles, they made no hill of their own. In a busy patch of frame 1 it found 7 particles; refocusing finds 21, and about 25 can be counted by eye. Across the whole frame it's 583 particles, up from 216:
+
+![The same close-up of frame 1, as recorded and refocused to 4.6 mm. Blue circles: the old method's finds](figures/refocus_vs_recorded_frame001.jpg)
 
 ## First results (flight frame 1)
 

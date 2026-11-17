@@ -1,9 +1,9 @@
-"""Tests for describe.py: round particles pass, fibres and off-centre points don't."""
+"""Tests for describe.py: particles pass, fibres don't."""
 
 import numpy as np
 
-from describe import describe, rotational_average, roundness
-from detect import Detection, contrast_map
+from describe import describe
+from detect import Detection, detect
 from flatten import BLACK_LEVEL, flatten
 from optics import PIXEL, Particle, hologram, propagate
 
@@ -11,9 +11,9 @@ SHAPE = (1400, 1400)
 CENTRE = 700
 
 
-def fake_flattened(light, seed=0):
+def fake_flattened(light, seed=0, level=1000):
     rng = np.random.default_rng(seed)
-    return flatten(rng.poisson(1000 * light).astype(np.float32) + BLACK_LEVEL)
+    return flatten(rng.poisson(level * light).astype(np.float32) + BLACK_LEVEL)
 
 
 def fibre(length_um, width_um, z, angle=0.6):
@@ -28,67 +28,38 @@ def fibre(length_um, width_um, z, angle=0.6):
     return np.abs(1 - blocked) ** 2
 
 
-def test_perfectly_round_pattern_scores_about_one():
-    yy, xx = np.mgrid[-150:151, -150:151]
-    rings = np.cos(np.hypot(xx, yy) / 4.0)          # perfect concentric rings
-    assert roundness(rings, 150, 150) > 0.98
-    # ...and its rotational average is (almost) itself
-    patch = rings[70:231, 70:231]
-    assert np.corrcoef(rotational_average(patch).ravel(), patch.ravel())[0, 1] > 0.98
-
-
 def test_particle_is_a_particle():
     fl = fake_flattened(hologram(SHAPE, [Particle(CENTRE, CENTRE, 8e-3, 25e-6)]))
-    d = describe(fl, [Detection(CENTRE, CENTRE, 100.0)])[0]
-    assert d.roundness > 0.9
-    assert d.is_particle
+    found = [d for d in describe(fl, detect(fl)) if d.is_particle]
+    assert len(found) == 1
+    assert found[0].stretch < 1.5
 
 
 def test_fibre_is_not_a_particle():
+    # In focus, a fibre is a line: every dot found along it is stretched
     fl = fake_flattened(fibre(length_um=400, width_um=12, z=6e-3))
-    d = describe(fl, [Detection(CENTRE, CENTRE, 100.0)])[0]
-    assert not d.is_particle
+    described = describe(fl, detect(fl))
+    assert described                                   # it is seen...
+    assert not any(d.is_particle for d in described)   # ...but not counted as a particle
 
 
 def test_big_dark_fibre_is_rejected_by_dark_fraction():
     # Close to the sensor and thick, like the big curly fibres in frame 1
     fl = fake_flattened(fibre(length_um=800, width_um=120, z=1e-3))
-    d = describe(fl, [Detection(CENTRE, CENTRE, 100.0)])[0]
+    d = describe(fl, [Detection(CENTRE, CENTRE, 3.5e-3, 100.0, 1.0)])[0]
     assert d.dark_fraction > 0.15
     assert not d.is_particle
 
 
-def test_off_centre_point_is_much_less_round():
-    fl = fake_flattened(hologram(SHAPE, [Particle(CENTRE, CENTRE, 8e-3, 25e-6)]))
-    c = contrast_map(fl.flat)
-    assert roundness(c, CENTRE + 40, CENTRE) < roundness(c, CENTRE, CENTRE) - 0.3
-
-
-def test_detection_between_two_particles_becomes_two_particles():
-    # The detector can land halfway between two similar rings, because the
-    # pair looks the same rotated 180 degrees about their midpoint
-    left, right = Particle(CENTRE - 55, CENTRE, 8e-3, 25e-6), Particle(CENTRE + 55, CENTRE, 10e-3, 22e-6)
-    fl = fake_flattened(hologram(SHAPE, [left, right]))
-    described = describe(fl, [Detection(CENTRE, CENTRE, 100.0)])   # one detection, in the middle
-    particles = [d for d in described if d.is_particle]
-    assert len(particles) == 2
-    for p in (left, right):
-        assert min(np.hypot(d.x - p.x, d.y - p.y) for d in particles) <= 3
-
-
-def test_noise_does_not_make_a_faint_ring_look_less_round():
-    # The same particle under bright light and under very dim, noisy light
+def test_faint_particle_in_dim_light_is_still_a_particle():
     light = hologram(SHAPE, [Particle(CENTRE, CENTRE, 8e-3, 25e-6)])
-    bright = fake_flattened(light)                       # 1000 units of light
-    rng = np.random.default_rng(1)
-    dim = flatten(rng.poisson(20 * light).astype(np.float32) + BLACK_LEVEL)   # 20 units
-    detection = [Detection(CENTRE, CENTRE, 10.0)]
-    assert describe(dim, detection)[0].is_particle
-    assert abs(describe(dim, detection)[0].roundness - describe(bright, detection)[0].roundness) < 0.15
+    dim = fake_flattened(light, seed=1, level=20)       # 20 units of light, very noisy
+    found = [d for d in describe(dim, detect(dim)) if d.is_particle]
+    assert len(found) == 1
+    assert np.hypot(found[0].x - CENTRE, found[0].y - CENTRE) <= 3
 
 
 def test_pure_noise_in_dim_light_has_no_particles():
-    from detect import detect
     for seed, light in enumerate((4, 12, 40)):
         rng = np.random.default_rng(seed)
         fl = flatten(rng.poisson(np.full((1500, 2000), float(light))).astype(np.float32) + BLACK_LEVEL)

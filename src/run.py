@@ -33,7 +33,7 @@ from raw_io import load_raw, parse_filename
 LASER_ON_MIN = 20   # a frame counts as lit if its median reading is this far above the
                     # camera's zero. Lit flight frames sit 120-210 above; dark ones 0
 
-DETECTION_COLUMNS = ["frame", "time_utc", "x", "y", "strength", "roundness",
+DETECTION_COLUMNS = ["frame", "time_utc", "x", "y", "z_mm", "strength", "stretch",
                      "dark_fraction", "is_particle"]
 SUMMARY_COLUMNS = ["frame", "time_utc", "laser_on", "light_median", "light_max",
                    "usable_pct", "detections", "particles", "seconds"]
@@ -43,14 +43,17 @@ def is_laser_on(raw: np.ndarray) -> bool:
     return float(np.median(raw)) > BLACK_LEVEL + LASER_ON_MIN
 
 
-def process_frame(raw_path: Path, out_dir: Path) -> dict:
-    """Steps 1-4 on one frame. Writes its CSV and returns its summary row."""
+def process_frame(raw_path: Path, out_dir: Path, threads: int = 1) -> dict:
+    """Steps 1-4 on one frame. Writes its CSV and returns its summary row.
+
+    threads: CPU threads this frame may use (for the refocusing FFTs).
+    """
     # Imported here so each worker process loads them itself
     import cv2
     from describe import describe
     from detect import detect
 
-    cv2.setNumThreads(1)   # we already run one frame per CPU core; don't oversubscribe
+    cv2.setNumThreads(threads)   # other frames run at the same time; don't oversubscribe
     start = time.time()
     info = parse_filename(raw_path)
     raw = load_raw(raw_path)
@@ -60,10 +63,11 @@ def process_frame(raw_path: Path, out_dir: Path) -> dict:
     rows = []
     if summary["laser_on"]:
         fl = flatten(raw)
-        described = describe(fl, detect(fl))
+        described = describe(fl, detect(fl, workers=threads))
         rows = [{"frame": info.camera_id, "time_utc": when, "x": d.x, "y": d.y,
-                 "strength": round(d.strength, 2), "roundness": round(d.roundness, 4),
-                 "dark_fraction": round(d.dark_fraction, 4), "is_particle": d.is_particle}
+                 "z_mm": round(d.z * 1e3, 2), "strength": round(d.strength, 2),
+                 "stretch": round(d.stretch, 3), "dark_fraction": round(d.dark_fraction, 4),
+                 "is_particle": d.is_particle}
                 for d in described]
         summary.update(light_median=round(float(np.median(fl.beam)), 1),
                        light_max=round(float(fl.beam.max()), 1),
@@ -120,8 +124,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the ATMOS pipeline on a folder of raw frames")
     parser.add_argument("folder", type=Path, help="folder containing .raw frames (searched recursively)")
     parser.add_argument("--out", type=Path, default=Path("results"), help="where to write results")
-    parser.add_argument("--workers", type=int, default=max(1, min(4, (os.cpu_count() or 2) - 1)),
-                        help="frames processed at the same time (default: up to 4)")
+    # Refocusing a frame takes about 1.2 GB of memory, and each frame's FFTs can use
+    # several threads, so a few frames at once with the cores shared out is fastest
+    parser.add_argument("--workers", type=int, default=max(1, min(3, (os.cpu_count() or 2) // 4)),
+                        help="frames processed at the same time (default: up to 3)")
     args = parser.parse_args()
 
     raws = sorted(args.folder.rglob("*.raw"), key=lambda p: parse_filename(p).camera_id)
@@ -138,7 +144,8 @@ def main() -> None:
     # it everywhere means the script behaves the same on every computer
     with ProcessPoolExecutor(max_workers=args.workers,
                              mp_context=multiprocessing.get_context("spawn")) as pool:
-        jobs = {pool.submit(process_frame, p, args.out): p for p in to_do}
+        threads = max(1, (os.cpu_count() or 2) // args.workers)
+        jobs = {pool.submit(process_frame, p, args.out, threads): p for p in to_do}
         for done, job in enumerate(as_completed(jobs), start=1):
             try:
                 s = job.result()
